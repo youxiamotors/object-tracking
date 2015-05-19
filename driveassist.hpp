@@ -1,8 +1,11 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <sys/time.h>
 
 #include <opencv2/opencv.hpp>
 
+#include "feature_base.hpp"
+#include "feature_meanfunc.hpp"
 
 using namespace std;
 using namespace cv;
@@ -14,7 +17,7 @@ namespace ot {
 /**
  * 颜色直方图特征
  */
-class ColorHist {
+class ColorHist : public FeatureBase {
     protected:
         int bins;
         MatND hist;
@@ -25,33 +28,13 @@ class ColorHist {
         ColorHist(Mat& _input, Rect roi) {
             bins = 16;
             
-            if (roi.x + roi.width > _input.cols || roi.width < 0) {
-                roi.width = 0;
-            }
-            if (roi.y + roi.height > _input.rows || roi.height < 0) {
-                roi.height = 0;
-            }
-            if (roi.x >= _input.cols) {
-                roi.x = _input.cols - 1;
-            }
-            else if (roi.x < 0) {
-                roi.x = 0;
-            }
-            if (roi.y >= _input.rows) {
-                roi.y = _input.rows - 1;
-            }
-            else if (roi.y < 0) {
-                roi.y = 0;
-            }
-            
+            fixROI(roi, _input);
             
             Mat img = Mat(_input, roi);
             calc(img);
         }
     
-        ~ColorHist() {
-            
-        }
+        ~ColorHist() {}
         
     
         /**
@@ -84,11 +67,7 @@ class ColorHist {
             
             
             /// 转换为概率密度分布
-            
-            double s = sum(hist)[0];
-            for (int i = 0; i < bins; i++) {
-                hist.at<float>(i) /= s;
-            }
+            normalize(hist, hist);
             
             /*
             assert(hist.rows > 0);
@@ -143,9 +122,8 @@ class ColorHist {
             
             
             p = compareHist(feature.hist, hist, CV_COMP_BHATTACHARYYA);
-            p = exp(-0.1 * p);
+            p = exp(-20.0 * (p * p));
             p = isnan(p) ? 0 : p;
-            p *= p;
             
             
             return p;
@@ -156,6 +134,59 @@ class ColorHist {
 };
 
     
+
+class RGBHist : public FeatureBase {
+    protected:
+        static const int rbins = 8;
+        static const int gbins = 8;
+        static const int bbins = 8;
+        static const int dims = 3;
+        Mat hist;
+        
+    public:
+        RGBHist() {};
+        ~RGBHist() {};
+        
+        RGBHist(Mat& _input, Rect roi) {
+            fixROI(roi, _input);
+            
+            Mat iROI = Mat(_input, roi);
+            calc(iROI);
+        }
+        
+
+        void calc(Mat& _input) {   
+            Mat img = _input;
+        
+            int hist_size[] = {rbins, gbins, bbins};
+            float rrange[] = {0, 255};  
+            float grange[] = {0, 255};  
+            float brange[] = {0, 255};  
+            const float *ranges[] = {rrange, grange, brange};  
+            int channels[] = {0, 1, 2};
+
+            calcHist( &img, 1, channels, Mat(), hist, dims, hist_size, ranges, true, false );
+            normalize(hist, hist);
+            
+        }
+        
+        double prob(RGBHist& feature) {
+            double p;
+            float bc;
+            
+            
+            bc = compareHist(feature.hist, hist, CV_COMP_BHATTACHARYYA);    /// 返回值区间为 [0, 1]
+            p = 0;
+
+            if (bc != 1.f) {
+                p = exp((-20.f) * (bc * bc));
+            }
+            
+            return p;
+        }
+};
+
+
 /**
  * 目标跟踪类
  */
@@ -166,14 +197,14 @@ class ObjectTracking {
             
             /// 默认使用颜色直方图特征
             Mat iPattern;
-            cvtColor(_input, iPattern, CV_RGB2HSV);
-            feature = new ColorHist(iPattern, roi);
+            iPattern = _input.clone();
+            feature = new MeanFunc(iPattern, roi);
             oldFeature = feature;
             
             /// 初始化粒子滤波
             conStateNum = 3;
             conMeasureNum = 3;
-            conSampleNum = 1000;
+            conSampleNum = 200;
             con = cvCreateConDensation(conStateNum, conMeasureNum, conSampleNum);
             
             lowerBound = cvCreateMat(conStateNum, 1, CV_32F);
@@ -200,7 +231,7 @@ class ObjectTracking {
             for(int i = 0; i < conSampleNum; i++){
                 //con->flSamples[i][0] = float(cvRandInt( &rng_state ) % _input.cols);    // X
                 //con->flSamples[i][1] = float(cvRandInt( &rng_state ) % _input.rows);    // Y
-                //con->flSamples[i][2] = float(cvRandInt( &rng_state ) % iInput.cols);  // height
+                //con->flSamples[i][2] = float(cvRandInt( &rng_state ) % _input.cols);  // height
                 con->flSamples[i][0] = roi.x;
                 con->flSamples[i][1] = roi.y;
                 con->flSamples[i][2] = roi.width;
@@ -223,7 +254,7 @@ class ObjectTracking {
         }
     
     protected:
-        ColorHist *feature, *oldFeature;
+        MeanFunc *feature, *oldFeature;
         Rect objRect;
         CvConDensation *con;
         int conSampleNum, conStateNum, conMeasureNum;
@@ -244,10 +275,11 @@ class ObjectTracking {
             
             /// 开始粒子滤波
             double maxp = 0;
-            ColorHist featureTmp;
+            double minp = 1;
+            MeanFunc featureTmp;
             Mat iPattern;
-            cvtColor(_input, iPattern, CV_RGB2HSV);
-            //iPattern = _input.clone();
+            //cvtColor(_input, iPattern, CV_RGB2HSV);
+            iPattern = _input.clone();
             //cvtColor(_input.clone(), _input, CV_RGB2HSV);
             
             
@@ -261,7 +293,7 @@ class ObjectTracking {
                 width = con->flSamples[i][2];
                 
                 
-                ColorHist *featureTmp = new ColorHist(iPattern, Rect(x, y, width, width));
+                MeanFunc *featureTmp = new MeanFunc(iPattern, Rect(x, y, width, width));
                 p = oldFeature->prob(*featureTmp);
                 delete featureTmp;
                 
@@ -269,6 +301,9 @@ class ObjectTracking {
                 if (p > maxp) {
                     maxp = p;
                     //fprintf(stderr, "max p = %0.2f, pos = (%d, %d)\n", p * 100, x, y);
+                }
+                if (p < minp) {
+                    minp = p;
                 }
                 
                 /// 在原图中绘制出粒子
@@ -284,9 +319,13 @@ class ObjectTracking {
             cvtColor(_input, t, CV_RGB2GRAY);
             for (int x = 0; x < _input.cols; x += 1) {
                 for (int y = 0; y < _input.rows; y += 1) {
-                    ColorHist featureTmp = ColorHist(_input, Rect(x, y, objRect.width, objRect.height));
+                    MeanFunc featureTmp = MeanFunc(iPattern, Rect(x, y, objRect.width, objRect.height));
                     double p = oldFeature->prob(featureTmp);
                     p *= 255;
+                    p -= 200;
+                    p *= 4;
+                    p -= 200;
+                    p *= 10;
                     
                     //fprintf(stderr, "prob=%lf\n", p);
                     t.ptr<unsigned char>(y)[x] = p;
@@ -308,11 +347,11 @@ class ObjectTracking {
             
             char txt[1024] = {0};
             double p_target;
-            featureTmp = ColorHist(iPattern, Rect(objRect.x, objRect.y, objRect.width, objRect.height));
+            featureTmp = MeanFunc(iPattern, Rect(objRect.x, objRect.y, objRect.width, objRect.height));
             
             p_target = oldFeature->prob(featureTmp);
             
-            snprintf(txt, sizeof(txt) - 1, "Max Prob: %.02f%%", maxp * 100);
+            snprintf(txt, sizeof(txt) - 1, "Max & Min Prob: %.02f%%  %0.02f%%", maxp * 100, minp * 100);
             putText(_input, String(txt), Point(11, 21), CV_FONT_HERSHEY_DUPLEX, 0.7, CV_RGB(128, 128, 128), 1, CV_AA);
             putText(_input, String(txt), Point(9, 19), CV_FONT_HERSHEY_DUPLEX, 0.7, CV_RGB(128, 128, 128), 1, CV_AA);
             putText(_input, String(txt), Point(10, 20), CV_FONT_HERSHEY_DUPLEX, 0.7, CV_RGB(0, 255, 0), 1, CV_AA);
@@ -351,7 +390,12 @@ class ObjectTracking {
         Rect getObjectRect() {
             return objRect;
         }
-};    
+};
+
+
+
+
+
 
 
     
@@ -695,5 +739,21 @@ vector<Point> lanePF(Mat& _iInput) {
     ret.push_back(p2);
     ret.push_back(p3);
     
+    return ret;
+}
+
+
+
+/**
+ * 返回当前 Unix 时间戳，精确到微秒
+ */
+double getMicroTime() {
+    struct timeval tv;
+    double ret;
+    
+    gettimeofday(&tv, NULL);
+    
+    ret = 1.0 * tv.tv_sec + tv.tv_usec / 1000000.0;
+        
     return ret;
 }

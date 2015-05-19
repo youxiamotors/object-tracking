@@ -5,6 +5,8 @@
 
 #include "driveassist.hpp"
 
+#include "feature_meanfunc.hpp"
+
 #define LANE_USE_KALMAN 1
 
 /// 高速路
@@ -135,6 +137,18 @@ void followObject(Mat& iInput, Rect _roi) {
     }
     
     
+    /// 计算频率
+    static double t1 = getMicroTime();
+    double elapse = getMicroTime() - t1;
+    t1 = getMicroTime();
+    
+    char txt[1024] = {0};
+    snprintf(txt, sizeof(txt) - 1, "%0.1lf Hz", 1.0 / elapse);
+    putText(iInput, String(txt), Point(10, iInput.rows - 21), CV_FONT_HERSHEY_DUPLEX, 0.7, CV_RGB(255, 255, 255), 1, CV_AA);
+    putText(iInput, String(txt), Point(10, iInput.rows - 19), CV_FONT_HERSHEY_DUPLEX, 0.7, CV_RGB(255, 255, 255), 1, CV_AA);
+    putText(iInput, String(txt), Point(10, iInput.rows  -20), CV_FONT_HERSHEY_DUPLEX, 0.7, CV_RGB(0, 0, 255), 1, CV_AA);
+
+    
     obj->detect(iInput);
     
     Rect rctObj = obj->getObjectRect();
@@ -175,7 +189,7 @@ int main()
     fprintf(stderr, "Video size: %lfx%lf\n", width, height);
     
     
-    VideoWriter oVideoWriter ("/media/TOURO/LaneDetection.avi", CV_FOURCC('P','I','M','1'), 30, Size(width / 1.5, height / 1.5), true);
+    VideoWriter oVideoWriter ("/media/TOURO/ObjectTracking.avi", CV_FOURCC('P','I','M','1'), 30, Size(width / 1.5, height / 1.5), true);
     
         
     
@@ -189,7 +203,7 @@ int main()
             start += 1;
         }
         
-    capVideo >> frame;    
+        capVideo >> frame;  
         
 
         if (frame.empty()) {

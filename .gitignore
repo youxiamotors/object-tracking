@@ -1,2 +1,4 @@
 valgrind*
 *.o
+driveassist
+*callgrind*
