@@ -276,7 +276,7 @@ class ObjectTracking {
             /// 开始粒子滤波
             double maxp = 0;
             double minp = 1;
-            MeanFunc featureTmp;
+            
             Mat iPattern;
             //cvtColor(_input, iPattern, CV_RGB2HSV);
             iPattern = _input.clone();
@@ -288,10 +288,15 @@ class ObjectTracking {
                 int x, y, width;
                 double p;
                 
+                
                 x = con->flSamples[i][0];
                 y = con->flSamples[i][1];
                 width = con->flSamples[i][2];
-                
+                /*
+                x = objRect.x;
+                y = objRect.y;
+                width = objRect.width;
+                */
                 
                 MeanFunc *featureTmp = new MeanFunc(iPattern, Rect(x, y, width, width));
                 p = oldFeature->prob(*featureTmp);
@@ -322,16 +327,13 @@ class ObjectTracking {
                     MeanFunc featureTmp = MeanFunc(iPattern, Rect(x, y, objRect.width, objRect.height));
                     double p = oldFeature->prob(featureTmp);
                     p *= 255;
-                    p -= 200;
-                    p *= 4;
-                    p -= 200;
-                    p *= 10;
                     
                     //fprintf(stderr, "prob=%lf\n", p);
-                    t.ptr<unsigned char>(y)[x] = p;
+                    t.ptr<unsigned char>(y)[x] = (int)p;
                 }
             }
             imshow("Heat Map", t);
+            imwrite("/media/TOURO/heatmap.png", t);
             */
             
 
@@ -347,9 +349,9 @@ class ObjectTracking {
             
             char txt[1024] = {0};
             double p_target;
-            featureTmp = MeanFunc(iPattern, Rect(objRect.x, objRect.y, objRect.width, objRect.height));
+            MeanFunc featureTmp2 = MeanFunc(iPattern, Rect(objRect.x, objRect.y, objRect.width, objRect.height));
             
-            p_target = oldFeature->prob(featureTmp);
+            p_target = oldFeature->prob(featureTmp2);
             
             snprintf(txt, sizeof(txt) - 1, "Max & Min Prob: %.02f%%  %0.02f%%", maxp * 100, minp * 100);
             putText(_input, String(txt), Point(11, 21), CV_FONT_HERSHEY_DUPLEX, 0.7, CV_RGB(128, 128, 128), 1, CV_AA);
@@ -379,8 +381,6 @@ class ObjectTracking {
                 col = CV_RGB(255, 0, 0);
             }
             rectangle(_input, Point(objRect.x, objRect.y), Point(objRect.x + objRect.width, objRect.y + objRect.height), col, 2);
-            
-            imshow("Particles", _input);
             
             //_waitKey();
         };

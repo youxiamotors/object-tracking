@@ -2,3 +2,4 @@ valgrind*
 *.o
 driveassist
 *callgrind*
+core

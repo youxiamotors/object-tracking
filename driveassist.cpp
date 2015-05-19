@@ -138,9 +138,17 @@ void followObject(Mat& iInput, Rect _roi) {
     
     
     /// 计算频率
-    static double t1 = getMicroTime();
+    double t1 = getMicroTime();
+    
+    obj->detect(iInput);
+    Rect rctObj = obj->getObjectRect();
+    
     double elapse = getMicroTime() - t1;
-    t1 = getMicroTime();
+    
+    
+    /// 绘制探测到的目标窗口
+    rectangle(imgOrigin, Point(rctObj.x, rctObj.y), Point(rctObj.x + rctObj.width, rctObj.y + rctObj.height), CV_RGB(128, 128, 255), 2);
+    
     
     char txt[1024] = {0};
     snprintf(txt, sizeof(txt) - 1, "%0.1lf Hz", 1.0 / elapse);
@@ -148,18 +156,8 @@ void followObject(Mat& iInput, Rect _roi) {
     putText(iInput, String(txt), Point(10, iInput.rows - 19), CV_FONT_HERSHEY_DUPLEX, 0.7, CV_RGB(255, 255, 255), 1, CV_AA);
     putText(iInput, String(txt), Point(10, iInput.rows  -20), CV_FONT_HERSHEY_DUPLEX, 0.7, CV_RGB(0, 0, 255), 1, CV_AA);
 
-    
-    obj->detect(iInput);
-    
-    Rect rctObj = obj->getObjectRect();
-    
-    /// 绘制探测到的目标窗口
-    rectangle(imgOrigin, Point(rctObj.x, rctObj.y), Point(rctObj.x + rctObj.width, rctObj.y + rctObj.height), CV_RGB(128, 128, 255), 2);
-    
-    
-    /// 在小窗口中绘制探测到的图像
-    //imshow("探测到的对象", Mat(imgOrigin, rctObj));
-    
+
+    imshow("Particles", iInput);
 }
 
 
@@ -205,6 +203,7 @@ int main()
         
         capVideo >> frame;  
         
+        
 
         if (frame.empty()) {
             break;
@@ -223,7 +222,7 @@ int main()
 
         Rect roiCar = Rect(carROIX, carROIY, carROIWidth, carROIHeight);
         followObject(imgClone, roiCar);
-            
+        
 
         imshow(winOrigin, imgOrigin);
         
