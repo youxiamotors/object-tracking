@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <iostream>
 #include "feature_meanfunc.hpp"
 
@@ -43,14 +44,30 @@ void MeanFunc::calc(Mat& _input) {
     
     resize(_input, iResize, size);
     split(iResize, rgb);
-    //cvtColor(iResize, iGray, CV_RGB2GRAY);
+    cvtColor(iResize, iGray, CV_RGB2GRAY);
     
     for (int i = 0; i < 3; i++) {
         Mat iChannel = rgb[i];
+        //equalizeHist(iChannel, iChannel);
+        double mean = 0;
         
         for (int x = 0; x < iChannel.cols; x++) {
             for (int y = 0; y < iChannel.rows; y++) {
+                mean += iChannel.ptr<unsigned char>(y)[x];
                 hash[i][y + x * iChannel.rows] = iChannel.ptr<unsigned char>(y)[x];
+            }
+        }
+        
+        mean /= (size.width * size.height);
+        
+        for (int x = 0; x < iChannel.cols; x++) {
+            for (int y = 0; y < iChannel.rows; y++) {
+                if (iChannel.ptr<unsigned char>(y)[x] > mean) {
+                    hash[i][y + x * iChannel.rows] = 1;
+                }
+                else {
+                    hash[i][y + x * iChannel.rows] = 0;
+                }
             }
         }
     }
@@ -66,14 +83,8 @@ double MeanFunc::prob(MeanFunc& feature) {
     
     for (int idx = 0; idx < 3; idx++) {
         for (long i = 0; i < size.width * size.height; i++) {
-            unsigned char c = hash[idx][i] ^ feature.hash[idx][i];
-            
-            for (int k = 0; k < 8; k++) {
-                if ((c & (unsigned char)0x01) == (unsigned char)0x01) {
-                    diffs[idx]++;
-                }
-                
-                c >>= 1;
+            if (hash[idx][i] != feature.hash[idx][i]) {
+                diffs[idx]++;
             }
         }
     }
@@ -89,7 +100,7 @@ double MeanFunc::prob(MeanFunc& feature) {
     
     double prob[3] = {0};
     for (int i = 0; i < 3; i++) {
-        prob[i] = diffs[i] / (8.0 * size.width * size.height);
+        prob[i] = diffs[i] / (1.0 * size.width * size.height);
         prob[i] = 1 - prob[i];
         prob[i] *= prob[i];
     }

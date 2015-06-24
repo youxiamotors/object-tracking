@@ -16,7 +16,7 @@ class FeatureBase {
     /**
      * 将一个 ROI 调整为不超过图像边界
      */
-    Rect fixROI(Rect& roi, Mat& _input) {
+    static Rect fixROI(Rect& roi, const Mat& _input) {
         if (roi.x + roi.width > _input.cols || roi.width <= 0) {
             roi.width = 1;
         }

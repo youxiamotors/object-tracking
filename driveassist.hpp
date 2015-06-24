@@ -6,9 +6,15 @@
 
 #include "feature_base.hpp"
 #include "feature_meanfunc.hpp"
+#include "feature_svd.hpp"
+#include "feature_hog.hpp"
 
 using namespace std;
 using namespace cv;
+
+namespace cv {
+    typedef Rect_<float> Rectf;
+}
 
 
 namespace ot {
@@ -134,7 +140,9 @@ class ColorHist : public FeatureBase {
 };
 
     
-
+/**
+ * RGB 直方图特征
+ */
 class RGBHist : public FeatureBase {
     protected:
         static const int rbins = 8;
@@ -167,7 +175,6 @@ class RGBHist : public FeatureBase {
 
             calcHist( &img, 1, channels, Mat(), hist, dims, hist_size, ranges, true, false );
             normalize(hist, hist);
-            
         }
         
         double prob(RGBHist& feature) {
@@ -187,19 +194,45 @@ class RGBHist : public FeatureBase {
 };
 
 
+
 /**
  * 目标跟踪类
+ * 
+ * 使用粒子滤波对目标进行跟踪，概率使用目标的图形特征进行计算。
+ * 可以使用构造函数中的 regions 参数来计算多个子区域的特征，并取子区域特征的概率的平均值作为最终概率
  */
+template <class T>
 class ObjectTracking {
     public: 
-        ObjectTracking(Mat& _input, Rect roi) {
+        /**
+         * 构造函数
+         * 
+         * @param Mat&      输入图像
+         * @param Rect      要跟踪的目标的位置
+         * @param vector<Rect_<float>>*  要跟踪的目标的特征子区域（相对于 ROI 区域，使用百分比坐标），如果传入 NULL，则不使用子区域
+         */
+        ObjectTracking(Mat& _input, Rect roi, vector<Rect_<float> > *regions) {
             objRect = roi;
             
-            /// 默认使用颜色直方图特征
+            subROI.clear();
+            if (regions == NULL) {
+                subROI.push_back(Rect(0, 0, 1, 1));
+            }
+            else {
+                unsigned int i;
+                for (i = 0; i < regions->size(); i++) {
+                    subROI.push_back((*regions)[i]);
+                }
+            }
+            
+            fprintf(stderr, "使用了 %lu 个子特征\n", subROI.size());
+            
+
             Mat iPattern;
             iPattern = _input.clone();
-            feature = new MeanFunc(iPattern, roi);
-            oldFeature = feature;
+            updateSubRegions(iPattern, roi);
+            oldFeatures = features;
+            
             
             /// 初始化粒子滤波
             conStateNum = 3;
@@ -217,7 +250,7 @@ class ObjectTracking {
             cvmSet(upperBound, 0, 0, 30);
             cvmSet(upperBound, 1, 0, 30);
             cvmSet(upperBound, 2, 0, 20);
-            float A[][3] = {
+            float A[3][3] = {
                 1, 0, 0, 
                 0, 1, 0,
                 0, 0, 1
@@ -240,22 +273,76 @@ class ObjectTracking {
     
     
         ~ObjectTracking() {
-            if (oldFeature != NULL) {
-                delete oldFeature;
-                oldFeature = NULL;
-            }
-            if (feature != NULL) {
-                delete feature;
-                feature = NULL;
-            }
+            features.clear();
+            oldFeatures.clear();
             
             free(lowerBound);
             free(upperBound);
         }
     
+        
+        /**
+         * 使用给定的图像，更新（或创建）子区域的特征
+         * 
+         * @param Mat&  指定的原图
+         * @param Rect  感兴趣区域
+         */
+        void updateSubRegions(Mat& img, Rect roi) {
+            Mat iROI = Mat(img, roi);
+            vector<Rect> r;
+            
+            this->subROITransform(iROI, r);
+            
+            features.clear();
+            for (unsigned int i = 0; i < r.size(); i++) {
+                //FeatureBase::fixROI(r[i], iROI);
+                
+                char title[1024] = {0};
+                sprintf(title, "子区域 %u", i);
+                imshow(title, Mat(iROI, r[i]));
+                
+                features.push_back(T(iROI, r[i]));
+            }
+        }
+        
+        
+        /**
+         * 将按比例保存的 subROI 转换成绝对坐标 
+         * 
+         * @param const Mat&    输入图像，转换后的 ROI 将以该图像的大小作为基准
+         * @param vector<Rect>& 转换后的 ROI
+         */
+        void subROITransform(const Mat& img, vector<Rect> &roi) {
+            unsigned int i;
+            
+            roi.clear();
+            for (i = 0; i < subROI.size(); i++) {
+                Rect r;
+                r.x = subROI[i].x * img.cols;
+                r.y = subROI[i].y * img.rows;
+                r.width = subROI[i].width * img.cols + 1;
+                r.height = subROI[i].height * img.rows + 1;
+                
+                if (r.x + r.width > img.cols) {
+                    r.width = img.cols - r.x;
+                }
+                if (r.y + r.height > img.rows) {
+                    r.height = img.rows - r.y;
+                }
+                
+                assert(r.width > 0 && r.height > 0 && r.x >= 0 && r.y >= 0);
+                
+                roi.push_back(r);
+            }
+            
+            assert(subROI.size() == roi.size());
+        }
+        
+    
     protected:
-        MeanFunc *feature, *oldFeature;
+        vector<T> features, oldFeatures;
         Rect objRect;
+        vector<Rectf> subROI;        /** 子区域 ROI，以百分比保存，比如 (0, 0, 1, 1) 就代表整张图片，(0, 0, 0.5, 0.5) 就代表图片左上部分 **/
         CvConDensation *con;
         int conSampleNum, conStateNum, conMeasureNum;
         CvMat *lowerBound, *upperBound;
@@ -282,7 +369,6 @@ class ObjectTracking {
             iPattern = _input.clone();
             //cvtColor(_input.clone(), _input, CV_RGB2HSV);
             
-            
             //#pragma omp parallel for
             for (int i = 0; i < conSampleNum; i++) {
                 int x, y, width;
@@ -298,9 +384,10 @@ class ObjectTracking {
                 width = objRect.width;
                 */
                 
-                MeanFunc *featureTmp = new MeanFunc(iPattern, Rect(x, y, width, width));
-                p = oldFeature->prob(*featureTmp);
-                delete featureTmp;
+                Rect r = Rect(x, y, width, width);
+                FeatureBase::fixROI(r, iPattern);
+                p = prob(Mat(iPattern, r));
+                
                 
                 con->flConfidence[i] = p;
                 if (p > maxp) {
@@ -324,16 +411,16 @@ class ObjectTracking {
             cvtColor(_input, t, CV_RGB2GRAY);
             for (int x = 0; x < _input.cols; x += 1) {
                 for (int y = 0; y < _input.rows; y += 1) {
-                    MeanFunc featureTmp = MeanFunc(iPattern, Rect(x, y, objRect.width, objRect.height));
+                    T featureTmp = T(iPattern, Rect(x, y, objRect.width, objRect.height));
                     double p = oldFeature->prob(featureTmp);
                     p *= 255;
                     
-                    //fprintf(stderr, "prob=%lf\n", p);
+                    fprintf(stderr, "(%3d, %3d) prob=%lf\n", x, y, p);
                     t.ptr<unsigned char>(y)[x] = (int)p;
                 }
             }
             imshow("Heat Map", t);
-            imwrite("/media/TOURO/heatmap.png", t);
+            imwrite("/media/TOURO/heatmap-hog.png", t);
             */
             
 
@@ -349,9 +436,9 @@ class ObjectTracking {
             
             char txt[1024] = {0};
             double p_target;
-            MeanFunc featureTmp2 = MeanFunc(iPattern, Rect(objRect.x, objRect.y, objRect.width, objRect.height));
+            Mat imgTmp2 = Mat(iPattern, Rect(objRect.x, objRect.y, objRect.width, objRect.height));
             
-            p_target = oldFeature->prob(featureTmp2);
+            p_target = prob(imgTmp2);
             
             snprintf(txt, sizeof(txt) - 1, "Max & Min Prob: %.02f%%  %0.02f%%", maxp * 100, minp * 100);
             putText(_input, String(txt), Point(11, 21), CV_FONT_HERSHEY_DUPLEX, 0.7, CV_RGB(128, 128, 128), 1, CV_AA);
@@ -385,6 +472,30 @@ class ObjectTracking {
             //_waitKey();
         };
         
+        
+        /**
+         * 对一个给定的区域，计算该区域与原始特征的概率
+         */
+        double prob(Mat img) {
+            assert(oldFeatures.size() == subROI.size());
+            assert(subROI.size() > 0);
+            
+            vector<Rect> r;
+            unsigned int i;
+            double p = 1;
+            
+            this->subROITransform(img, r);
+            
+            for (i = 0; i < r.size(); i++) {
+                T *featureTmp = new T(img, r[i]);
+                p *= oldFeatures[i].prob(*featureTmp);
+                delete featureTmp;
+            }
+            
+            p = powl(p, (1.0 / r.size()));
+            
+            return p;
+        }
         
         
         Rect getObjectRect() {

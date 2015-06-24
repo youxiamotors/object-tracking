@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <typeinfo>
 #include <opencv2/opencv.hpp>
 #include <opencv2/legacy/legacy.hpp>
 
@@ -94,7 +95,8 @@ int ransacIterNum = 50;
 /**
  * 车辆探测和测距使用的参数
  */
-/**
+/*
+#define SRC "file:///media/TOURO/PAPAGO/190CRASH/13510002.MOV"
 int mmppx = 100;    /// IPM 图中每个像素的长度，单位：毫米
 int carOriginX = 380;    /// imgIPM32 图中汽车前脸的坐标
 int carOriginY = 200;    /// imgIPM32 图中汽车前脸的坐标
@@ -103,6 +105,7 @@ int carROIY = 665 / 1.5;
 int carROIWidth = 80 / 1.5;
 int carROIHeight = 80 /1.5;
 */
+
 
 #define SRC "file:///media/TOURO/PAPAGO/431CRASH/09230001.MOV"
 int mmppx = 100;    /// IPM 图中每个像素的长度，单位：毫米
@@ -126,22 +129,51 @@ Mat frame, imgOrigin, imgROI, imgGray, imgIPM, imgIPM32, imgGaussian, imgThresho
 
 
 void followObject(Mat& iInput, Rect _roi) {
-    static ObjectTracking *obj = NULL;
-    if (obj == NULL) {
-        obj = new ObjectTracking(iInput, _roi);
+    static char initialized = 0;
     
+    
+    /**
+     * 建立子区域列表
+     * 在这里选取的子区域是，取全图作为 0 号区域，1～4 号区域如下图所示，另外取图片的中心作为 5 号和 6 号区域
+     * 
+     *  +---------+
+     *  +  1 | 2  +
+     *  +----+----+
+     *  +  4 | 3  +
+     *  +---------+
+     * 
+     */
+    vector<Rectf> rois;
+    rois.push_back(Rectf(0, 0, 1, 1));  /// 全图
+    
+    /// 1~4 号区域
+    rois.push_back(Rectf(0, 0, 0.5, 0.5));
+    rois.push_back(Rectf(0.5, 0, 0.5, 0.5));
+    rois.push_back(Rectf(0.5, 0.5, 0.5, 0.5));
+    rois.push_back(Rectf(0, 0.5, 0.5, 0.5));
+    
+    rois.push_back(Rectf(0.25, 0.25, 0.5, 0.5));    /// 图片中心（一半大小）
+    rois.push_back(Rectf(0.15, 0.15, 0.7, 0.7));    /// 图片中心（0.7 倍大小）
+    
+    
+    static ObjectTracking<FeatureHOG> obj(iInput, _roi, &rois);    
+    
+    
+    if (!initialized) {
         /// 绘制原始图像
         imshow("原始跟踪图像", Mat(iInput, _roi));
         
         fprintf(stderr, "对象追踪初始化完毕\n");
+        
+        initialized = 1;
     }
     
     
     /// 计算频率
     double t1 = getMicroTime();
     
-    obj->detect(iInput);
-    Rect rctObj = obj->getObjectRect();
+    obj.detect(iInput);
+    Rect rctObj = obj.getObjectRect();
     
     double elapse = getMicroTime() - t1;
     
@@ -201,7 +233,7 @@ int main()
             start += 1;
         }
         
-        capVideo >> frame;  
+         capVideo >> frame; 
         
         
 
